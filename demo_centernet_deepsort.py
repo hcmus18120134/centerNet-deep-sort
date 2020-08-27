@@ -1,29 +1,45 @@
+import argparse
 import os
-import cv2
-import numpy as np
-
-# In order to solve CUDA OOM issue
-import torch
-torch.backends.cudnn.deterministic = True
-
 #CenterNet
 import sys
+import time
 CENTERNET_PATH = '/content/centerNet-deep-sort/CenterNet/src/lib'
 sys.path.insert(0, CENTERNET_PATH)
-from detectors.detector_factory import detector_factory
+from tqdm import tqdm
+import cv2
+import numpy as np
+# In order to solve CUDA OOM issue
+import torch
+from deep_sort import DeepSort
 from opts import opts
-
-
-MODEL_PATH = '/content/aic_cam21/model_last.pth'
-ARCH = 'dla_34'
-
-#MODEL_PATH = './CenterNet/models/ctdet_coco_resdcn18.pth'
-#ARCH = 'resdcn_18'
+from util import COLORS_10, draw_bboxes
+from detectors.detector_factory import detector_factory
+torch.backends.cudnn.deterministic = True
 
 
 
+def getOptions(args=sys.argv[1:]):
+    parser = argparse.ArgumentParser(description="Parses command.")
+    parser.add_argument("-i", "--input", help="Your input video path.")
+    parser.add_argument("-o", "--output", help="Your destination output video path.")
+    parser.add_argument("-cp", "--checkpoint", help="Your model path.")
+    parser.add_argument("-t", "--text_output", help="Your text output path.")
+    parser.add_argument("-w", "--write_vid", help="= True if write video.")
+    options = parser.parse_args(args)
+    return options
+
+options = getOptions(sys.argv[1:])
+print(options)
 TASK = 'ctdet' # or 'multi_pose' for human pose estimation
+MODEL_PATH = options.checkpoint
+ARCH = 'dla_34'
 opt = opts().init('{} --load_model {} --arch {}'.format(TASK, MODEL_PATH, ARCH).split(' '))
+
+txt_path = options.text_output
+opt.vid_path = options.input  
+is_write = options.write_vid
+
+
 
 #vis_thresh
 opt.vis_thresh = 0.2
@@ -34,7 +50,6 @@ opt.input_type = 'vid'   # for video, 'vid',  for webcam, 'webcam', for ip camer
 
 #------------------------------
 # for video
-opt.vid_path = 'inp.mp4'  #
 #------------------------------
 # for webcam  (webcam device index is required)
 opt.webcam_ind = 0
@@ -46,10 +61,7 @@ opt.ipcam_no = 8
 #------------------------------
 
 
-from deep_sort import DeepSort
-from util import COLORS_10, draw_bboxes
 
-import time
 
 
 def bbox_to_xywh_cls_conf(bbox):
@@ -85,7 +97,7 @@ class Detector(object):
 
         self.write_video = True
 
-    def open(self, video_path):
+    def open(self):
 
         if opt.input_type == 'webcam':
             self.vdo.open(opt.webcam_ind)
@@ -108,10 +120,10 @@ class Detector(object):
         self.im_height = int(self.vdo.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         self.area = 0, 0, self.im_width, self.im_height
-        if self.write_video:
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            self.output = cv2.VideoWriter("demo1.avi", fourcc, 20, (self.im_width, self.im_height))
-        #return self.vdo.isOpened()
+        if is_write:
+            if self.write_video:
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                self.output = cv2.VideoWriter(options.output, fourcc, 20, (self.im_width, self.im_height))
 
 
 
@@ -119,10 +131,18 @@ class Detector(object):
         xmin, ymin, xmax, ymax = self.area
         frame_no = 0
         avg_fps = 0.0
+        try: 
+          os.makedirs(txt_path)
+        except: 
+            pass
+
+        total_frames = int(self.vdo.get(cv2.CAP_PROP_FRAME_COUNT))
+        pbar = tqdm(total=total_frames)
         while self.vdo.grab():
+            txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
+            f = open(txt_file,'w')
             if frame_no > 2000: 
               break
-            frame_no +=1
             start = time.time()
             _, ori_im = self.vdo.retrieve()
             im = ori_im[ymin:ymax, xmin:xmax]
@@ -139,8 +159,18 @@ class Detector(object):
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, offset=(xmin, ymin))
-
+                    offset=(xmin, ymin)
+                    if is_write:
+                        ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, offset=(xmin, ymin))
+                    
+                    for i,box in enumerate(bbox_xyxy):
+                        x1,y1,x2,y2 = [int(i) for i in box]
+                        x1 += offset[0]
+                        x2 += offset[0]
+                        y1 += offset[1]
+                        y2 += offset[1]
+                        idx = int(identities[i]) if identities is not None else 0    
+                        f.write(f'{frame_no} {idx} {x1} {y1} {x2} {y2}\n')
 
             end = time.time()
             #print("deep time: {}s, fps: {}".format(end - start_deep_sort, 1 / (end - start_deep_sort)))
@@ -148,13 +178,17 @@ class Detector(object):
             fps =  1 / (end - start )
 
             avg_fps += fps
-            if frame_no % 600 == 1:
-              print("centernet time: {}s, fps: {}, avg fps : {}".format(end - start, fps,  avg_fps/frame_no))
 
+            if is_write:
+                if self.write_video:
+                    self.output.write(ori_im)
+            f.close()
 
-            if self.write_video:
-                self.output.write(ori_im)
-
+            frame_no +=1
+            pbar.set_description("fps: {:.2f}, avg fps : {:.2f}".format(fps,  avg_fps/frame_no))
+            pbar.update(frame_no)
+        pbar.close()
+        
 
 
 if __name__ == "__main__":
@@ -163,13 +197,9 @@ if __name__ == "__main__":
         pass
     import warnings
     warnings.warn = warn
-    # if len(sys.argv) == 1:
-    #     print("Usage: python demo_yolo3_deepsort.py [YOUR_VIDEO_PATH]")
-    # else:
 
-    #opt = opts().init()
+
     det = Detector(opt)
 
-    # det.open("D:\CODE\matlab sample code/season 1 episode 4 part 5-6.mp4")
-    det.open("inp.mp4")
+    det.open()
     det.detect()

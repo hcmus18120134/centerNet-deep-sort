@@ -17,8 +17,8 @@ class Extractor(object):
 
     def __call__(self, img):
         assert isinstance(img, np.ndarray), "type error"
-        img = img.astype(np.float)#/255.
         img = cv2.resize(img, (64,128))
+        img = img.astype(np.float)#/255.
         img = torch.from_numpy(img).float().permute(2,0,1)
         img = self.norm(img).unsqueeze(0)
         with torch.no_grad():
