@@ -147,7 +147,11 @@ class Detector(object):
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
             start = time.time()
+            # _, ori_im = self.vdo.retrieve()
             im = ori_im[ymin:ymax, xmin:xmax]
+            #im = ori_im[ymin:ymax, xmin:xmax, :]
+
+            #start_center =  time.time()
 
             results = self.detector.run(im)['results']
             for class_id in [1,2,3,4]:
