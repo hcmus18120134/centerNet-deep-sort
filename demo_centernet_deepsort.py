@@ -64,14 +64,11 @@ opt.ipcam_no = 8
 
 
 
-def bbox_to_xywh_cls_conf(bbox):
-    obj_id = [1,2,3,4]
+def bbox_to_xywh_cls_conf(bbox,obj_id):
+    # obj_id = [1,2,3,4]
     #confidence = 0.5
     # only person
-    tmp = bbox[obj_id[0]]
-    for i in range(1,4):
-      tmp = np.concatenate((tmp, bbox[obj_id[i]]), axis=0)
-    bbox = tmp
+    bbox = bbox[obj_id]
     if any(bbox[:, 4] > opt.vis_thresh):
 
         bbox = bbox[bbox[:, 4] > opt.vis_thresh, :]
@@ -113,17 +110,19 @@ class Detector(object):
 
         # video
         else :
-            assert os.path.isfile(opt.vid_path), "Error: path error"
-            self.vdo.open(opt.vid_path)
-
-        self.im_width = int(self.vdo.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.im_height = int(self.vdo.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # assert os.path.isfile(opt.vid_path), "Error: path error"
+            # self.vdo.open(opt.vid_path)
+            self.vdo = [os.path.join(opt.vid_path,x) for x in os.listdir(opt.vid_path)]
+            self.vdo.sort()
+        sample = cv2.imread(self.vdo[0])
+        self.im_height = int(sample.shape[0])
+        self.im_width = int(sample.shape[1])
 
         self.area = 0, 0, self.im_width, self.im_height
         if is_write:
             if self.write_video:
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                self.output = cv2.VideoWriter(options.output, fourcc, 20, (self.im_width, self.im_height))
+                self.output = cv2.VideoWriter(options.output, fourcc, 10, (self.im_width, self.im_height))
 
 
 
@@ -136,41 +135,45 @@ class Detector(object):
         except: 
             pass
 
-        total_frames = int(self.vdo.get(cv2.CAP_PROP_FRAME_COUNT))
-        pbar = tqdm(total=total_frames)
-        while self.vdo.grab():
+        total_frames = range(len(self.vdo))
+        pbar = tqdm(self.vdo)
+        # while self.vdo.grab():
+        for path in pbar:
+            ori_im = cv2.imread(path)
+            frame_no += 1
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
             if frame_no > 2000: 
               break
             start = time.time()
-            _, ori_im = self.vdo.retrieve()
+            # _, ori_im = self.vdo.retrieve()
             im = ori_im[ymin:ymax, xmin:xmax]
             #im = ori_im[ymin:ymax, xmin:xmax, :]
 
             #start_center =  time.time()
 
             results = self.detector.run(im)['results']
-            bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results)
+            for class_id in [1,2,3,4]:
+                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results, class_id)
 
-            if bbox_xywh is not None:
-                outputs = self.deepsort.update(bbox_xywh, cls_conf, im)
+                if bbox_xywh is not None:
+                    outputs = self.deepsort.update(bbox_xywh, cls_conf, im)
 
-                if len(outputs) > 0:
-                    bbox_xyxy = outputs[:, :4]
-                    identities = outputs[:, -1]
-                    offset=(xmin, ymin)
-                    if is_write:
-                        ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, offset=(xmin, ymin))
-                    
-                    for i,box in enumerate(bbox_xyxy):
-                        x1,y1,x2,y2 = [int(i) for i in box]
-                        x1 += offset[0]
-                        x2 += offset[0]
-                        y1 += offset[1]
-                        y2 += offset[1]
-                        idx = int(identities[i]) if identities is not None else 0    
-                        f.write(f'{frame_no} {idx} {x1} {y1} {x2} {y2}\n')
+                    if len(outputs) > 0:
+                        bbox_xyxy = outputs[:, :4]
+                        identities = outputs[:, -1]
+                        offset=(xmin, ymin)
+                        if is_write:
+                            ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, offset=(xmin, ymin))
+                        
+                        for i,box in enumerate(bbox_xyxy):
+                            x1,y1,x2,y2 = [int(i) for i in box]
+                            x1 += offset[0]
+                            x2 += offset[0]
+                            y1 += offset[1]
+                            y2 += offset[1]
+                            idx = int(identities[i]) if identities is not None else 0    
+                            f.write(f'{frame_no} {idx} {class_id} {x1} {y1} {x2} {y2}\n')
 
             end = time.time()
             #print("deep time: {}s, fps: {}".format(end - start_deep_sort, 1 / (end - start_deep_sort)))
@@ -185,10 +188,9 @@ class Detector(object):
             f.close()
 
             frame_no +=1
-            pbar.set_description("fps: {:.2f}, avg fps : {:.2f}".format(fps,  avg_fps/frame_no))
-            pbar.update(frame_no)
+            pbar.set_description("frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(frame_no, fps,  avg_fps/frame_no))
         pbar.close()
-        
+        self.write_video.release()
 
 
 if __name__ == "__main__":
