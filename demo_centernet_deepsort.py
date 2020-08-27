@@ -8,13 +8,13 @@ torch.backends.cudnn.deterministic = True
 
 #CenterNet
 import sys
-CENTERNET_PATH = '/home/asoft/centerNet-deep-sort/CenterNet/src/lib/'
+CENTERNET_PATH = '/content/centerNet-deep-sort/CenterNet/src/lib'
 sys.path.insert(0, CENTERNET_PATH)
 from detectors.detector_factory import detector_factory
 from opts import opts
 
 
-MODEL_PATH = './CenterNet/models/ctdet_coco_dla_2x.pth'
+MODEL_PATH = '/content/aic_cam21/model_last.pth'
 ARCH = 'dla_34'
 
 #MODEL_PATH = './CenterNet/models/ctdet_coco_resdcn18.pth'
@@ -26,7 +26,7 @@ TASK = 'ctdet' # or 'multi_pose' for human pose estimation
 opt = opts().init('{} --load_model {} --arch {}'.format(TASK, MODEL_PATH, ARCH).split(' '))
 
 #vis_thresh
-opt.vis_thresh = 0.5
+opt.vis_thresh = 0.2
 
 
 #input_type
@@ -34,7 +34,7 @@ opt.input_type = 'vid'   # for video, 'vid',  for webcam, 'webcam', for ip camer
 
 #------------------------------
 # for video
-opt.vid_path = 'MOT16-11.mp4'  #
+opt.vid_path = 'inp.mp4'  #
 #------------------------------
 # for webcam  (webcam device index is required)
 opt.webcam_ind = 0
@@ -53,11 +53,13 @@ import time
 
 
 def bbox_to_xywh_cls_conf(bbox):
-    person_id = 1
+    obj_id = [1,2,3,4]
     #confidence = 0.5
     # only person
-    bbox = bbox[person_id]
-
+    tmp = bbox[obj_id[0]]
+    for i in range(1,4):
+      tmp = np.concatenate((tmp, bbox[obj_id[i]]), axis=0)
+    bbox = tmp
     if any(bbox[:, 4] > opt.vis_thresh):
 
         bbox = bbox[bbox[:, 4] > opt.vis_thresh, :]
@@ -118,7 +120,8 @@ class Detector(object):
         frame_no = 0
         avg_fps = 0.0
         while self.vdo.grab():
-
+            if frame_no > 2000: 
+              break
             frame_no +=1
             start = time.time()
             _, ori_im = self.vdo.retrieve()
@@ -145,10 +148,9 @@ class Detector(object):
             fps =  1 / (end - start )
 
             avg_fps += fps
-            print("centernet time: {}s, fps: {}, avg fps : {}".format(end - start, fps,  avg_fps/frame_no))
+            if frame_no % 600 == 1:
+              print("centernet time: {}s, fps: {}, avg fps : {}".format(end - start, fps,  avg_fps/frame_no))
 
-            cv2.imshow("test", ori_im)
-            cv2.waitKey(1)
 
             if self.write_video:
                 self.output.write(ori_im)
@@ -157,16 +159,17 @@ class Detector(object):
 
 if __name__ == "__main__":
     import sys
-
+    def warn(*args, **kwargs):
+        pass
+    import warnings
+    warnings.warn = warn
     # if len(sys.argv) == 1:
     #     print("Usage: python demo_yolo3_deepsort.py [YOUR_VIDEO_PATH]")
     # else:
-    cv2.namedWindow("test", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("test", 800, 600)
 
     #opt = opts().init()
     det = Detector(opt)
 
     # det.open("D:\CODE\matlab sample code/season 1 episode 4 part 5-6.mp4")
-    det.open("MOT16-11.mp4")
+    det.open("inp.mp4")
     det.detect()
