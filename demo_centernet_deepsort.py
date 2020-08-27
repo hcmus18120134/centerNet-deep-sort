@@ -10,11 +10,11 @@ import cv2
 import numpy as np
 # In order to solve CUDA OOM issue
 import torch
+torch.backends.cudnn.deterministic = True
 from deep_sort import DeepSort
 from opts import opts
 from util import COLORS_10, draw_bboxes
 from detectors.detector_factory import detector_factory
-torch.backends.cudnn.deterministic = True
 
 
 
@@ -64,11 +64,12 @@ opt.ipcam_no = 8
 
 
 
-def bbox_to_xywh_cls_conf(bbox,obj_id):
-    # obj_id = [1,2,3,4]
+def bbox_to_xywh_cls_conf(bbox,class_id):
     #confidence = 0.5
     # only person
-    bbox = bbox[obj_id]
+    bbox = bbox[class_id]
+    # print(bbox[:5, :])
+
     if any(bbox[:, 4] > opt.vis_thresh):
 
         bbox = bbox[bbox[:, 4] > opt.vis_thresh, :]
@@ -89,7 +90,9 @@ class Detector(object):
 
         #centerNet detector
         self.detector = detector_factory[opt.task](opt)
-        self.deepsort = DeepSort("deep/checkpoint/ckpt.t7")
+        self.deepsort = [] 
+        for i in range(5):
+            self.deepsort.append(DeepSort("deep/checkpoint/ckpt.t7"))
 
 
         self.write_video = True
@@ -143,29 +146,23 @@ class Detector(object):
             frame_no += 1
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
-            if frame_no > 2000: 
-              break
             start = time.time()
-            # _, ori_im = self.vdo.retrieve()
             im = ori_im[ymin:ymax, xmin:xmax]
-            #im = ori_im[ymin:ymax, xmin:xmax, :]
-
-            #start_center =  time.time()
 
             results = self.detector.run(im)['results']
             for class_id in [1,2,3,4]:
-                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results, class_id)
+                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
 
                 if bbox_xywh is not None:
-                    outputs = self.deepsort.update(bbox_xywh, cls_conf, im)
+                    outputs = self.deepsort[class_id].update(bbox_xywh, cls_conf, im)
 
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
+                        
                         offset=(xmin, ymin)
                         if is_write:
-                            ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, offset=(xmin, ymin))
-                        
+                            ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, class_id, offset=(xmin, ymin))
                         for i,box in enumerate(bbox_xyxy):
                             x1,y1,x2,y2 = [int(i) for i in box]
                             x1 += offset[0]
@@ -190,7 +187,7 @@ class Detector(object):
             frame_no +=1
             pbar.set_description("frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(frame_no, fps,  avg_fps/frame_no))
         pbar.close()
-        self.write_video.release()
+        self.output.release()
 
 
 if __name__ == "__main__":
@@ -199,7 +196,7 @@ if __name__ == "__main__":
         pass
     import warnings
     warnings.warn = warn
-
+    print(is_write)
 
     det = Detector(opt)
 

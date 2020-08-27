@@ -188,7 +188,8 @@ class Detector(object):
             pbar.set_description("fps: {:.2f}, avg fps : {:.2f}".format(fps,  avg_fps/frame_no))
             pbar.update(frame_no)
         pbar.close()
-        self.write_video.release()
+        self.output.release()
+
         
 
 
