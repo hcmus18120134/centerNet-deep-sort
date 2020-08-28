@@ -143,15 +143,10 @@ class Detector(object):
         # while self.vdo.grab():
         for path in pbar:
             ori_im = cv2.imread(path)
-            frame_no += 1
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
             start = time.time()
-            # _, ori_im = self.vdo.retrieve()
             im = ori_im[ymin:ymax, xmin:xmax]
-            #im = ori_im[ymin:ymax, xmin:xmax, :]
-
-            #start_center =  time.time()
 
             results = self.detector.run(im)['results']
             for class_id in [1,2,3,4]:
@@ -177,7 +172,6 @@ class Detector(object):
                             f.write(f'{frame_no} {idx} {class_id} {x1} {y1} {x2} {y2}\n')
 
             end = time.time()
-            #print("deep time: {}s, fps: {}".format(end - start_deep_sort, 1 / (end - start_deep_sort)))
 
             fps =  1 / (end - start )
 
