@@ -120,8 +120,8 @@ class Detector(object):
         sample = cv2.imread(self.vdo[0])
         self.im_height = int(sample.shape[0])
         self.im_width = int(sample.shape[1])
-
         self.area = 0, 0, self.im_width, self.im_height
+        print(self.area)
         if is_write:
             if self.write_video:
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
