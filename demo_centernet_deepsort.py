@@ -137,7 +137,7 @@ class Detector(object):
           os.makedirs(txt_path)
         except: 
             pass
-
+        skipped_frames = 0
         total_frames = range(len(self.vdo))
         pbar = tqdm(self.vdo)
         # while self.vdo.grab():
@@ -149,28 +149,32 @@ class Detector(object):
             im = ori_im[ymin:ymax, xmin:xmax]
 
             results = self.detector.run(im)['results']
+            
             for class_id in [1,2,3,4]:
-                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
+                try:
+                    bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
 
-                if bbox_xywh is not None:
-                    outputs = self.deepsort[class_id].update(bbox_xywh, cls_conf, im)
+                    if bbox_xywh is not None:
+                        outputs = self.deepsort[class_id].update(bbox_xywh, cls_conf, im)
 
-                    if len(outputs) > 0:
-                        bbox_xyxy = outputs[:, :4]
-                        identities = outputs[:, -1]
-                        
-                        offset=(xmin, ymin)
-                        if is_write:
-                            ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, class_id, offset=(xmin, ymin))
-                        for i,box in enumerate(bbox_xyxy):
-                            x1,y1,x2,y2 = [int(i) for i in box]
-                            x1 += offset[0]
-                            x2 += offset[0]
-                            y1 += offset[1]
-                            y2 += offset[1]
-                            idx = int(identities[i]) if identities is not None else 0    
-                            f.write(f'{frame_no} {idx} {class_id} {x1} {y1} {x2} {y2}\n')
-
+                        if len(outputs) > 0:
+                            bbox_xyxy = outputs[:, :4]
+                            identities = outputs[:, -1]
+                            
+                            offset=(xmin, ymin)
+                            if is_write:
+                                ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, class_id, offset=(xmin, ymin))
+                            for i,box in enumerate(bbox_xyxy):
+                                x1,y1,x2,y2 = [int(i) for i in box]
+                                x1 += offset[0]
+                                x2 += offset[0]
+                                y1 += offset[1]
+                                y2 += offset[1]
+                                idx = int(identities[i]) if identities is not None else 0    
+                                f.write(f'{frame_no} {idx} {class_id} {x1} {y1} {x2} {y2}\n')
+                except:
+                    skipped_frames += 1
+                    pass
             end = time.time()
 
             fps =  1 / (end - start )
@@ -183,7 +187,7 @@ class Detector(object):
             f.close()
 
             frame_no +=1
-            pbar.set_description("frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(frame_no, fps,  avg_fps/frame_no))
+            pbar.set_description("skipped: {} frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(skipped_frames, frame_no, fps,  avg_fps/frame_no))
         pbar.close()
         self.output.release()
 
