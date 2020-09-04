@@ -145,9 +145,9 @@ class Detector(object):
         for path in pbar:
             frame_no +=1
             start = time.time()
+            skip = not(skip)
             if skip: 
                 continue
-            skip = not(skip)
             ori_im = cv2.imread(path)
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
