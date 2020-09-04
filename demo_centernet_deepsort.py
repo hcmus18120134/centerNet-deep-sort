@@ -146,9 +146,6 @@ class Detector(object):
             frame_no +=1
             start = time.time()
             if skip: 
-                end = time.time()
-                fps =  1 / (end - start )
-                avg_fps += fps
                 continue
             skip = not(skip)
             ori_im = cv2.imread(path)
