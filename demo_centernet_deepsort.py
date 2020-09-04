@@ -141,11 +141,19 @@ class Detector(object):
         total_frames = range(len(self.vdo))
         pbar = tqdm(self.vdo)
         # while self.vdo.grab():
+        skip = True
         for path in pbar:
+            frame_no +=1
+            start = time.time()
+            if skip: 
+                end = time.time()
+                fps =  1 / (end - start )
+                avg_fps += fps
+                continue
+            skip = not(skip)
             ori_im = cv2.imread(path)
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
-            start = time.time()
             im = ori_im[ymin:ymax, xmin:xmax]
 
             results = self.detector.run(im)['results']
@@ -186,7 +194,6 @@ class Detector(object):
                     self.output.write(ori_im)
             f.close()
 
-            frame_no +=1
             pbar.set_description("skipped: {} frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(skipped_frames, frame_no, fps,  avg_fps/frame_no))
         pbar.close()
         self.output.release()
