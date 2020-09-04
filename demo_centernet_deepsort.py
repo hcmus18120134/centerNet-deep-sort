@@ -171,7 +171,7 @@ class Detector(object):
                                 y1 += offset[1]
                                 y2 += offset[1]
                                 idx = int(identities[i]) if identities is not None else 0    
-                                f.write(f'{frame_no} {idx} {class_id} {x1} {y1} {x2} {y2}\n')
+                                f.write(f'{frame_no} {class_id} {idx} {x1} {y1} {x2} {y2}\n')
                 except:
                     skipped_frames += 1
                     pass
