@@ -39,7 +39,7 @@ opt = opts().init('{} --load_model {} --arch {}'.format(TASK, MODEL_PATH, ARCH).
 txt_path = options.text_output
 opt.vid_path = options.input  
 is_write = options.write_vid
-
+options.skip_frame = int(options.skip_frame)
 
 
 #vis_thresh
@@ -148,9 +148,10 @@ class Detector(object):
         pbar.refresh()
         frame_id = 0
         skip = True
+        print('skip {} frames mode'.format(options.skip_frame))
         while self.vdo.grab():
             frame_no +=1
-            if frame_no % (opt.skip_frame + 1):
+            if (frame_no % (options.skip_frame + 1)):
                 continue
             start = time.time()
             _, ori_im = self.vdo.retrieve()
