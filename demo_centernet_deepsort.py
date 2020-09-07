@@ -15,7 +15,8 @@ from deep_sort import DeepSort
 from opts import opts
 from util import COLORS_10, draw_bboxes
 from detectors.detector_factory import detector_factory
-
+import queue
+import torch.multiprocessing as mp
 
 
 def getOptions(args=sys.argv[1:]):
@@ -84,17 +85,20 @@ def bbox_to_xywh_cls_conf(bbox,class_id):
         return None, None
 
 
+class QueueItem():
+    def __init__(self, detect_results, imgs, ori_imgs, frame_ids):
+        self.detect_results = detect_results
+        self.imgs = imgs
+        self.ori_imgs = ori_imgs
+        self.frame_ids = frame_ids
+        
 class Detector(object):
     def __init__(self, opt):
         self.vdo = cv2.VideoCapture()
 
         #centerNet detector
         self.detector = detector_factory[opt.task](opt)
-        self.deepsort = [] 
-        for i in range(5):
-            self.deepsort.append(DeepSort("deep/checkpoint/ckpt.t7"))
-
-
+        self.detector.model.share_memory()
         self.write_video = True
 
     def open(self):
@@ -131,17 +135,11 @@ class Detector(object):
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 self.output = cv2.VideoWriter(options.output, fourcc, 10, (self.im_width, self.im_height))
 
-
+        os.makedirs(os.path.dirname(txt_path), exist_ok=True)
 
     def detect(self):
+        self.skipped_frames = 0
         xmin, ymin, xmax, ymax = self.area
-        frame_no = 0
-        avg_fps = 0.0
-        try: 
-          os.makedirs(txt_path)
-        except: 
-            pass
-        skipped_frames = 0
         total_frames = range((13500))
         pbar = tqdm(total_frames)
         pbar.total = 13500
@@ -149,64 +147,109 @@ class Detector(object):
         frame_id = 0
         skip = True
         print('skip {} frames mode'.format(options.skip_frame))
+        batch_size = 4
+
+        batch_count = 0
+        imgs = []
+        ori_imgs = []
+        frame_ids = []
+        queue_items = mp.Queue(maxsize=5)
+        proc_tracking = mp.Process(target=tracking, args=(queue_items, self.area))
+        proc_tracking.start()
+        time.sleep(2) # wait for load model deepsort in Tracking
         while self.vdo.grab():
-            frame_no +=1
-            if (frame_no % (options.skip_frame + 1)):
-                continue
-            start = time.time()
-            _, ori_im = self.vdo.retrieve()
-            txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
-            f = open(txt_file,'w')
-            im = ori_im[ymin:ymax, xmin:xmax]
-
-            results = self.detector.run(im)['results']
+            ret, ori_im = self.vdo.retrieve()
+            if ret == False:
+                print('End of video')
+                break
+            frame_id += 1
+            batch_count += 1
             
-            for class_id in [1,2,3,4]:
-                try:
-                    bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
+            im = ori_im[ymin:ymax, xmin:xmax]
+            imgs.append(im)
+            ori_imgs.append(ori_im)
+            frame_ids.append(frame_id)
 
-                    if bbox_xywh is not None:
-                        outputs = self.deepsort[class_id].update(bbox_xywh, cls_conf, im)
-
-                        if len(outputs) > 0:
-                            bbox_xyxy = outputs[:, :4]
-                            identities = outputs[:, -1]
-                            
-                            offset=(xmin, ymin)
-                            if is_write:
-                                ori_im = draw_bboxes(ori_im, bbox_xyxy, identities, class_id, offset=(xmin, ymin))
-                            for i,box in enumerate(bbox_xyxy):
-                                x1,y1,x2,y2 = [int(i) for i in box]
-                                x1 += offset[0]
-                                x2 += offset[0]
-                                y1 += offset[1]
-                                y2 += offset[1]
-                                idx = int(identities[i]) if identities is not None else 0    
-                                f.write(f'{frame_no} {class_id} {idx} {x1} {y1} {x2} {y2}\n')
-                except:
-                    skipped_frames += 1
-                    pass
-            end = time.time()
-
-            fps =  1 / (end - start )
-
-            avg_fps += fps
+            if batch_count == batch_size:
+                print('Reach batch size!!')
+                results = self.detector.run(imgs)['results']
+                queue_item = QueueItem(results, imgs, ori_imgs, frame_ids)
+                queue_items.put(queue_item, block=True)
+                batch_count = 0
+                imgs = []
+                ori_imgs = []
+                frame_ids = []
 
             if is_write:
                 if self.write_video:
                     self.output.write(ori_im)
-            f.close()
+            
             pbar.update(1)
-            pbar.set_description("skipped: {} frame_id: {} fps: {:.2f}, avg fps : {:.2f}".format(skipped_frames, frame_no, fps,  avg_fps/frame_no))
+        if batch_count > 0:
+            print('Process last batch')
+            results = self.detector.run(imgs)['results']
+            queue_item = QueueItem(results, imgs, ori_imgs, frame_ids)
+            queue_items.put(queue_item, block=True)
+            batch_size = 0
+            imgs = []
+            ori_imgs = []
+            frame_ids = []
         pbar.close()
+        proc_tracking.join()
         self.output.release()
 
 
+def tracking(queue_items: mp.Queue, area):
+    txt_writer = open(txt_path, 'wt')
+    deepsorts = []
+    for i in range(5):
+        deepsort = DeepSort("deep/checkpoint/ckpt.t7")
+        deepsort.extractor.net.share_memory()
+        deepsorts.append(deepsort)
+    xmin, ymin, xmax, ymax = area
+    while True:
+        try:
+            queue_item = queue_items.get(block=True, timeout=3)
+        except queue.Empty:
+            print('Empty queue. End?')
+            break
+
+        batch_results = queue_item.detect_results
+        imgs = queue_item.imgs
+        ori_imgs = queue_item.ori_imgs
+        frame_ids = queue_item.frame_ids
+        for batch_idx, results in enumerate(batch_results): # frame by frame
+            for class_id in [1,2,3,4]:
+                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
+                if bbox_xywh is not None:
+                    outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
+                    if len(outputs) > 0:
+                        bbox_xyxy = outputs[:, :4]
+                        identities = outputs[:, -1]
+                        
+                        offset=(xmin, ymin)
+                        if is_write:
+                            ori_im = draw_bboxes(ori_imgs[batch_idx], bbox_xyxy, identities, class_id, offset=(xmin, ymin))
+                        for i,box in enumerate(bbox_xyxy):
+                            x1,y1,x2,y2 = [int(i) for i in box]
+                            x1 += offset[0]
+                            x2 += offset[0]
+                            y1 += offset[1]
+                            y2 += offset[1]
+                            idx = int(identities[i]) if identities is not None else 0    
+                            txt_writer.write(f'{frame_ids[batch_idx]} {class_id} {idx} {x1} {y1} {x2} {y2}\n')
+    txt_writer.close()
+
+
+
 if __name__ == "__main__":
+    mp.set_start_method('spawn')
     import sys
     def warn(*args, **kwargs):
         pass
+    
     import warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     warnings.warn = warn
     print(is_write)
 

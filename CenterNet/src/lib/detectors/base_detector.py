@@ -90,6 +90,8 @@ class BaseDetector(object):
       image = image_or_path_or_tensor
     elif type(image_or_path_or_tensor) == type (''): 
       image = cv2.imread(image_or_path_or_tensor)
+    elif type(image_or_path_or_tensor) == type([]):
+      pass
     else:
       image = image_or_path_or_tensor['image'][0].numpy()
       pre_processed_images = image_or_path_or_tensor
@@ -102,7 +104,15 @@ class BaseDetector(object):
     for scale in self.scales:
       scale_start_time = time.time()
       if not pre_processed:
-        images, meta = self.pre_process(image, scale, meta)
+        if type(image_or_path_or_tensor) == type([]):
+            batch_images = []
+            for image in image_or_path_or_tensor:
+                batch_images.append(self.pre_process(image, scale, meta))
+            batch_images, batch_metas = zip(*batch_images)
+            images = torch.cat(batch_images, dim=0)
+            batch_size = images.size(0)
+        else:
+            images, meta = self.pre_process(image, scale, meta)
       else:
         # import pdb; pdb.set_trace()
         images = pre_processed_images['images'][scale][0]
@@ -123,14 +133,22 @@ class BaseDetector(object):
       if self.opt.debug >= 2:
         self.debug(debugger, images, dets, output, scale)
       
-      dets = self.post_process(dets, meta, scale)
+      dets2 = []
+      for i in range(dets.size(0)): # for each image in batch
+        tmp_dets = self.post_process(dets[[i]], batch_metas[i], scale)
+        dets2.append(tmp_dets)
+    #   dets = self.post_process(dets, meta, scale)
+      dets = dets2
       torch.cuda.synchronize()
       post_process_time = time.time()
       post_time += post_process_time - decode_time
 
       detections.append(dets)
     
-    results = self.merge_outputs(detections)
+    batch_results = []
+    for sample_idx in range(batch_size):
+      results = self.merge_outputs([dets[sample_idx] for dets in detections])
+      batch_results.append(results)
     torch.cuda.synchronize()
     end_time = time.time()
     merge_time += end_time - post_process_time
@@ -139,6 +157,6 @@ class BaseDetector(object):
     # if self.opt.debug >= 1:
     #   self.show_results(debugger, image, results)
     
-    return {'results': results, 'tot': tot_time, 'load': load_time,
+    return {'results': batch_results, 'tot': tot_time, 'load': load_time,
             'pre': pre_time, 'net': net_time, 'dec': dec_time,
             'post': post_time, 'merge': merge_time}
