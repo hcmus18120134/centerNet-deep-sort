@@ -25,6 +25,7 @@ def getOptions(args=sys.argv[1:]):
     parser.add_argument("-cp", "--checkpoint", help="Your model path.")
     parser.add_argument("-t", "--text_output", help="Your text output path.")
     parser.add_argument("-w", "--write_vid", help="= True if write video.")
+    parser.add_argument("-skip", "--skip_frame", default= 0, help="= True if write video.")
     options = parser.parse_args(args)
     return options
 
@@ -149,11 +150,9 @@ class Detector(object):
         skip = True
         while self.vdo.grab():
             frame_no +=1
+            if frame_no % (opt.skip_frame + 1):
+                continue
             start = time.time()
-            # skip = not(skip)
-            # if skip: 
-            #     continue
-            # ori_im = cv2.imread(path)
             _, ori_im = self.vdo.retrieve()
             txt_file = os.path.join(txt_path,'{:05}.txt'.format(frame_no))
             f = open(txt_file,'w')
