@@ -8,7 +8,7 @@ import os
 #CenterNet
 import sys
 import time
-CENTERNET_PATH = '/content/centerNet-deep-sort/CenterNet/src/lib'
+CENTERNET_PATH = './CenterNet/src/lib'
 sys.path.insert(0, CENTERNET_PATH)
 from tqdm import tqdm
 import cv2
@@ -169,7 +169,7 @@ class Detector(object):
                 print('End of video')
                 break
             frame_id += 1
-            if (frame_id %(options.skip_frame+1)): continue
+            if (frame_id %(options.skip_frame+2)==2): continue
             batch_count += 1
             
             im = ori_im[ymin:ymax, xmin:xmax]
