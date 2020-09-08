@@ -1,8 +1,3 @@
-def warn(*args, **kwargs):
-        pass
-    
-import warnings
-warnings.warn = warn
 import argparse
 import os
 #CenterNet
@@ -22,6 +17,7 @@ from util import COLORS_10, draw_bboxes
 from detectors.detector_factory import detector_factory
 import queue
 import torch.multiprocessing as mp
+
 
 def getOptions(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(description="Parses command.")
@@ -150,10 +146,8 @@ class Detector(object):
         pbar.refresh()
         frame_id = 0
         skip = True
-        print('\n======================\n')
         print('skip {} frames mode'.format(options.skip_frame))
-        print('\n======================\n')
-        batch_size = 32
+        batch_size = 4
 
         batch_count = 0
         imgs = []
@@ -169,7 +163,6 @@ class Detector(object):
                 print('End of video')
                 break
             frame_id += 1
-            if (frame_id %(options.skip_frame+1)): continue
             batch_count += 1
             
             im = ori_im[ymin:ymax, xmin:xmax]
@@ -178,7 +171,7 @@ class Detector(object):
             frame_ids.append(frame_id)
 
             if batch_count == batch_size:
-                # print('Reach batch size!!')
+                print('Reach batch size!!')
                 results = self.detector.run(imgs)['results']
                 queue_item = QueueItem(results, imgs, ori_imgs, frame_ids)
                 queue_items.put(queue_item, block=True)
@@ -227,10 +220,7 @@ def tracking(queue_items: mp.Queue, area):
         frame_ids = queue_item.frame_ids
         for batch_idx, results in enumerate(batch_results): # frame by frame
             for class_id in [1,2,3,4]:
-                try:
-                    bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
-                except:
-                    continue
+                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
                 if bbox_xywh is not None:
                     outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
                     if len(outputs) > 0:
@@ -255,7 +245,12 @@ def tracking(queue_items: mp.Queue, area):
 if __name__ == "__main__":
     mp.set_start_method('spawn')
     import sys
+    def warn(*args, **kwargs):
+        pass
     
+    import warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.warn = warn
     print(is_write)
 
     det = Detector(opt)
