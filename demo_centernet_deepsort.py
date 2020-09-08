@@ -227,12 +227,12 @@ def tracking(queue_items: mp.Queue, area):
         frame_ids = queue_item.frame_ids
         for batch_idx, results in enumerate(batch_results): # frame by frame
             for class_id in [1,2,3,4]:
-                try:
-                    bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
-                except:
-                    continue
+                bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
                 if bbox_xywh is not None:
-                    outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
+                    try:
+                        outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
+                    except:
+                        continue
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
