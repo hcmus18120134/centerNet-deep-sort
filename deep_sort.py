@@ -38,8 +38,8 @@ class DeepSort(object):
 
 
         # update tracker
-        self.tracker.predict()
         for i in range(2):
+            self.tracker.predict()
             self.tracker.update(detections)
 
 
