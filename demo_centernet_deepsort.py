@@ -229,10 +229,7 @@ def tracking(queue_items: mp.Queue, area):
             for class_id in [1,2,3,4]:
                 bbox_xywh, cls_conf = bbox_to_xywh_cls_conf(results,class_id)
                 if bbox_xywh is not None:
-                    try:
-                        outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
-                    except:
-                        continue
+                    outputs = deepsorts[class_id].update(bbox_xywh, cls_conf, imgs[batch_idx])
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
