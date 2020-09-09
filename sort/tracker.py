@@ -1,138 +1,95 @@
-# vim: expandtab:ts=4:sw=4
-from __future__ import absolute_import
 import numpy as np
-from . import kalman_filter
-from . import linear_assignment
-from . import iou_matching
-from .track import Track
+
+from deep.feature_extractor import Extractor
+from sort.nn_matching import NearestNeighborDistanceMetric
+from sort.preprocessing import non_max_suppression
+from sort.detection import Detection
+from sort.tracker import Tracker
+
+import time
+
+class DeepSort(object):
+    def __init__(self, model_path):
+        self.min_confidence = 0.3
+        self.nms_max_overlap = 1.0
+
+        self.extractor = Extractor(model_path, use_cuda=True)
+
+        max_cosine_distance = 0.2
+        nn_budget = 100
+        n_init = 0
+        metric = NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
+        self.tracker = Tracker(metric,n_init=n_init)
+
+    def update(self, bbox_xywh, confidences, ori_img):
+        self.height, self.width = ori_img.shape[:2]
 
 
-class Tracker:
-    """
-    This is the multi-target tracker.
+        # generate detections
+        features = self._get_features(bbox_xywh, ori_img)
+        detections = [Detection(bbox_xywh[i], conf, features[i]) for i,conf in enumerate(confidences) if conf>self.min_confidence]
 
-    Parameters
-    ----------
-    metric : nn_matching.NearestNeighborDistanceMetric
-        A distance metric for measurement-to-track association.
-    max_age : int
-        Maximum number of missed misses before a track is deleted.
-    n_init : int
-        Number of consecutive detections before the track is confirmed. The
-        track state is set to `Deleted` if a miss occurs within the first
-        `n_init` frames.
 
-    Attributes
-    ----------
-    metric : nn_matching.NearestNeighborDistanceMetric
-        The distance metric used for measurement to track association.
-    max_age : int
-        Maximum number of missed misses before a track is deleted.
-    n_init : int
-        Number of frames that a track remains in initialization phase.
-    kf : kalman_filter.KalmanFilter
-        A Kalman filter to filter target trajectories in image space.
-    tracks : List[Track]
-        The list of active tracks at the current time step.
+        # run on non-maximum supression
+        boxes = np.array([d.tlwh for d in detections])
+        scores = np.array([d.confidence for d in detections])
+        indices = non_max_suppression( boxes, self.nms_max_overlap, scores)
+        detections = [detections[i] for i in indices]
 
-    """
 
-    def __init__(self, metric, max_iou_distance=0.7, max_age=30, n_init=3):
-        self.metric = metric
-        self.max_iou_distance = max_iou_distance
-        self.max_age = max_age
-        self.n_init = n_init
+        # update tracker
+        for i in range(2):
+            self.tracker.predict()
+            self.tracker.update(detections)
 
-        self.kf = kalman_filter.KalmanFilter()
-        self.tracks = []
-        self._next_id = 1
 
-    def predict(self):
-        """Propagate track state distributions one time step forward.
-
-        This function should be called once every time step, before `update`.
-        """
-        for track in self.tracks:
-            track.predict(self.kf)
-
-    def update(self, detections):
-        """Perform measurement update and track management.
-
-        Parameters
-        ----------
-        detections : List[deep_sort.detection.Detection]
-            A list of detections at the current time step.
-
-        """
-        # Run matching cascade.
-        matches, unmatched_tracks, unmatched_detections = \
-            self._match(detections)
-
-        # Update track set.
-        for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(
-                self.kf, detections[detection_idx])
-        for track_idx in unmatched_tracks:
-            self.tracks[track_idx].mark_missed()
-        for detection_idx in unmatched_detections:
-            self._initiate_track(detections[detection_idx])
-        self.tracks = [t for t in self.tracks if not t.is_deleted()]
-
-        # Update distance metric.
-        active_targets = [t.track_id for t in self.tracks if t.is_confirmed()]
-        features, targets = [], []
-        for track in self.tracks:
-            if not track.is_confirmed():
+        # output bbox identities
+        outputs = []
+        for track in self.tracker.tracks:
+            if not track.is_confirmed() or track.time_since_update > 1:
                 continue
-            features += track.features
-            targets += [track.track_id for _ in track.features]
-            track.features = []
-        self.metric.partial_fit(
-            np.asarray(features), np.asarray(targets), active_targets)
+            box = track.to_tlwh()
+            x1,y1,x2,y2 = self._xywh_to_xyxy_centernet(box)
+            track_id = track.track_id
+            outputs.append(np.array([x1,y1,x2,y2,track_id], dtype=np.int))
+        if len(outputs) > 0:
+            outputs = np.stack(outputs,axis=0)
 
-    def _match(self, detections):
 
-        def gated_metric(tracks, dets, track_indices, detection_indices):
-            features = np.array([dets[i].feature for i in detection_indices])
-            targets = np.array([tracks[i].track_id for i in track_indices])
-            cost_matrix = self.metric.distance(features, targets)
-            cost_matrix = linear_assignment.gate_cost_matrix(
-                self.kf, cost_matrix, tracks, dets, track_indices,
-                detection_indices)
+        return outputs
 
-            return cost_matrix
 
-        # Split track set into confirmed and unconfirmed tracks.
-        confirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if t.is_confirmed()]
-        unconfirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if not t.is_confirmed()]
 
-        # Associate confirmed tracks using appearance features.
-        matches_a, unmatched_tracks_a, unmatched_detections = \
-            linear_assignment.matching_cascade(
-                gated_metric, self.metric.matching_threshold, self.max_age,
-                self.tracks, detections, confirmed_tracks)
+    # for centernet (x1,x2 w,h -> x1,y1,x2,y2)
+    def _xywh_to_xyxy_centernet(self, bbox_xywh):
+        x1,y1,w,h = bbox_xywh
+        x1 = max(x1,0)
+        y1 = max(y1,0)
+        x2 = min(int(x1+w),self.width-1)
+        y2 = min(int(y1+h),self.height-1)
+        return int(x1),int(y1),x2,y2
 
-        # Associate remaining tracks together with unconfirmed tracks using IOU.
-        iou_track_candidates = unconfirmed_tracks + [
-            k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update == 1]
-        unmatched_tracks_a = [
-            k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update != 1]
-        matches_b, unmatched_tracks_b, unmatched_detections = \
-            linear_assignment.min_cost_matching(
-                iou_matching.iou_cost, self.max_iou_distance, self.tracks,
-                detections, iou_track_candidates, unmatched_detections)
+    # for yolo  (centerx,centerx, w,h -> x1,y1,x2,y2)
+    def _xywh_to_xyxy_yolo(self, bbox_xywh):
+        x,y,w,h = bbox_xywh
+        x1 = max(int(x-w/2),0)
+        x2 = min(int(x+w/2),self.width-1)
+        y1 = max(int(y-h/2),0)
+        y2 = min(int(y+h/2),self.height-1)
+        return x1,y1,x2,y2
 
-        matches = matches_a + matches_b
-        unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
-        return matches, unmatched_tracks, unmatched_detections
+    def _get_features(self, bbox_xywh, ori_img):
+        features = []
+        for box in bbox_xywh:
+            x1,y1,x2,y2 = self._xywh_to_xyxy_centernet(box)
+            im = ori_img[y1:y2,x1:x2]
+            feature = self.extractor(im)[0]
+            features.append(feature)
+        if len(features):
+            features = np.stack(features, axis=0)
+        else:
+            features = np.array([])
+        return features
 
-    def _initiate_track(self, detection):
-        mean, covariance = self.kf.initiate(detection.to_xyah())
-        self.tracks.append(Track(
-            mean, covariance, self._next_id, self.n_init, self.max_age,
-            detection.feature))
-        self._next_id += 1
+if __name__ == '__main__':
+    pass

@@ -82,9 +82,6 @@ class DeepSort(object):
         features = []
         for box in bbox_xywh:
             x1,y1,x2,y2 = self._xywh_to_xyxy_centernet(box)
-            if (x2-x1)*(y2 - y1) < 4: 
-                features.append(None)
-                continue
             im = ori_img[y1:y2,x1:x2]
             feature = self.extractor(im)[0]
             features.append(feature)

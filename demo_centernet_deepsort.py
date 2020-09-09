@@ -81,6 +81,8 @@ def bbox_to_xywh_cls_conf(bbox,class_id):
         bbox = bbox[bbox[:, 4] > opt.vis_thresh, :]
         bbox[:, 2] = bbox[:, 2] - bbox[:, 0]  #
         bbox[:, 3] = bbox[:, 3] - bbox[:, 1]  #
+        bbox = bbox[bbox[:, 2] > 1, :]
+        bbox = bbox[bbox[:, 3] > 1, :]
 
         return bbox[:, :4], bbox[:, 4]
 
