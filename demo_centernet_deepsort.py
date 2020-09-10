@@ -155,7 +155,7 @@ class Detector(object):
         print('\n======================\n')
         print('skip {} frames mode'.format(options.skip_frame))
         print('\n======================\n')
-        batch_size = 16
+        batch_size = 32
 
         batch_count = 0
         imgs = []
