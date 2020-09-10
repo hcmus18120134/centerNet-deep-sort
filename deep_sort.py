@@ -18,7 +18,7 @@ class DeepSort(object):
         max_cosine_distance = 0.2
         nn_budget = 100
         n_init = 0
-        # max_age = 70
+        max_age = 30
         metric = NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
         self.tracker = Tracker(metric,max_age = max_age, n_init=n_init)
 
